@@ -24,7 +24,7 @@ jobs:
           load: true
 
       - name: Scan with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: demo-api:ci
           format: table
