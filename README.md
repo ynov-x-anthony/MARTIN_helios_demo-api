@@ -1,89 +1,66 @@
 # demo-api
 
-Le fil rouge des quêtes Docker : une mini-API "catalogue" que tu vas
-conteneuriser, faire persister, mettre en réseau, orchestrer et sécuriser,
-une quête à la fois.
+Mini API catalogue avec Node.js, Express et PostgreSQL, utilisée pour les quêtes Docker.
 
-Le métier est volontairement trivial (`Node` + `Express` + `PostgreSQL`,
-un catalogue de produits) : toute la difficulté est sur **Docker**, jamais
-sur le code applicatif.
+## Prérequis
 
-## Point de départ
+- Docker Engine avec Compose v2 (`docker compose version`)
+- `curl`
 
-Ce dossier est ce que tu clones **avant ta première quête Docker**. Il n'y a
-volontairement **aucun fichier Docker** dedans, ni `Dockerfile`, ni
-`compose.yml` : ce sont précisément les fichiers que tu vas écrire, quête
-après quête, en faisant grossir ce dépôt.
+## Démarrer
 
-Sans conteneur, cette API ne démarre pas telle quelle : elle a besoin d'un
-PostgreSQL joignable pour répondre. C'est normal, et c'est tout le sujet de
-la première quête que de la faire tourner dans Docker.
+Copier la configuration et créer le fichier local du secret PostgreSQL :
 
-## Récupérer ce starter dans ton propre repo
+```sh
+cp .env.example .env
+mkdir -p secrets
+printf '%s\n' 'demo-password' > secrets/db_password.txt
+chmod 644 secrets/db_password.txt
+```
 
-Ce dépôt est un **starter en lecture seule** : tu ne pousses jamais
-directement ici. Avant de démarrer la première quête :
+Lancer les services :
 
-1. **Clone** ce repo starter :
-   ```bash
-   git clone git@github.com:ynov-x-anthony/docker-demo-api-starter.git NOM_prenom_demo-api
-   cd NOM_prenom_demo-api
-   ```
-2. **Supprime le remote `origin`** (il pointe vers le starter, pas vers toi) :
-   ```bash
-   git remote remove origin
-   ```
-3. **Crée ton propre repo** sur GitHub, dans l'organisation `ynov-x-anthony`,
-   en respectant la nomenclature **`NOM_prenom_demo-api`** (ex. :
-   `DUPONT_jean_demo-api`), puis ajoute-le comme nouveau remote et pousse :
-   ```bash
-   git remote add origin git@github.com:ynov-x-anthony/NOM_prenom_demo-api.git
-   git push -u origin main
-   ```
+```sh
+docker compose up -d --build
+docker compose ps
+```
 
-À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
-et c'est lui qui sera évalué, pas le starter.
+L'API est disponible sur `http://localhost:8080` et Adminer sur `http://localhost:8081`. Dans Adminer, choisir PostgreSQL, serveur `db`, puis utiliser l'utilisateur et la base définis dans `.env` ainsi que le mot de passe du fichier `secrets/db_password.txt`.
 
-## Ce que contient le repo
-
-| Fichier | Rôle |
-|---|---|
-| `api/server.js` | l'API Express (`/`, `/version`, `/health`, `/ready`, `/products`) |
-| `api/db.js` | connexion PostgreSQL, entièrement pilotée par des variables d'environnement |
-| `api/package.json`, `api/package-lock.json` | dépendances (`express`, `pg`) |
-| `db/init.sql` | création de la table `products` + quelques données de démo |
-
-## Les routes de l'API
+## API
 
 | Méthode | Route | Effet |
 |---|---|---|
-| `GET` | `/` | infos application + version |
-| `GET` | `/version` | numéro de version courant |
-| `GET` | `/health` | liveness, ne touche pas la base |
-| `GET` | `/ready` | readiness, teste la connexion à la base |
-| `GET` | `/products` | liste des produits |
-| `POST` | `/products` | crée un produit : `{ "name": "...", "price_cents": 1234 }` |
+| `GET` | `/` | Infos de l'application et version |
+| `GET` | `/version` | Version courante |
+| `GET` | `/health` | Vérifie que l'API répond |
+| `GET` | `/ready` | Vérifie la connexion PostgreSQL |
+| `GET` | `/products` | Liste les produits |
+| `POST` | `/products` | Crée un produit avec `name` et `price_cents` |
 
-## Ta progression, quête après quête
+Exemple :
 
-| Quête | Ce que tu ajoutes au repo |
-|---|---|
-| Découverte de Docker | rien ici, tu manipules des images publiques et un `psql` en conteneur |
-| Le Dockerfile | `api/Dockerfile`, `api/.dockerignore` : l'API tourne enfin dans un conteneur |
-| Les volumes | un volume nommé pour la persistance de PostgreSQL |
-| Les réseaux | des réseaux dédiés, la base jamais exposée directement |
-| Compose | `compose.yml`, `.env.example` : tous les services démarrent ensemble |
-| Dockerfile et sécurité | ton `Dockerfile` durci : utilisateur non-root, `HEALTHCHECK` |
-| Builds multi-étapes et gestion des secrets | `api/Dockerfile.multi` : image allégée, secrets hors de l'image |
-| Analyse de vulnérabilité avec Trivy | un pipeline CI qui scanne ton image et bloque sur les failles critiques |
+```sh
+curl -s http://localhost:8080/products
+curl -s -X POST http://localhost:8080/products \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Gourde","price_cents":900}'
+```
 
-## Prérequis machine (macOS / Linux / Windows)
+Testé avec `docker compose up -d --build`, puis `docker compose down` et un nouveau `docker compose up -d --build`. La Gourde reste présente après le redémarrage.
 
-- **Docker Engine + Compose v2** : le plugin intégré, invoqué en deux mots
-  `docker compose` (pas l'ancien binaire autonome `docker-compose` v1).
-  `docker compose version` doit répondre `v2.x` ou une version supérieure
-  (v3, v4, v5…). Ce qui compte, c'est que ce ne soit pas du v1 legacy.
-- macOS / Windows : **Docker Desktop** (ou Colima / Rancher Desktop).
-  Sous Windows, backend **WSL 2** : travaille depuis un terminal **WSL**.
-- `git`, `curl`. Node est nécessaire **seulement** si tu régénères
-  `package-lock.json` (`cd api && npm install`, déjà commité ici).
+```text
+$ docker compose ps
+NAME                 IMAGE                COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+demo-api-adminer-1   adminer:4            "entrypoint.sh docke…"   adminer   13 seconds ago   Up 12 seconds             0.0.0.0:8081->8080/tcp, [::]:8081->8080/tcp
+demo-api-api-1       demo-api-api         "docker-entrypoint.s…"   api       13 seconds ago   Up 6 seconds (healthy)    0.0.0.0:8080->3000/tcp, [::]:8080->3000/tcp
+demo-api-db-1        postgres:16-alpine   "docker-entrypoint.s…"   db        13 seconds ago   Up 12 seconds (healthy)   5432/tcp
+```
+
+Les données PostgreSQL restent dans le volume `pgdata` après `docker compose down`. Pour repartir de zéro et supprimer les données :
+
+```sh
+docker compose down -v
+```
+
+`.env` et `secrets/` sont des fichiers locaux ignorés par Git. Seul `.env.example` est versionné.
