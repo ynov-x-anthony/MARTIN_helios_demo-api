@@ -63,7 +63,14 @@ app.post('/products', async (req, res) => {
     return res.status(400).json({ error: 'name (string) et price_cents (entier >= 0) requis' });
   }
   try {
-    res.status(201).json(await db.addProduct(name, priceCents));
+    const product = await db.addProduct(name, priceCents);
+    fetch(`http://notifier:${process.env.NOTIFIER_PORT || 4000}/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: product.name }),
+      signal: AbortSignal.timeout(1000),
+    }).catch((err) => console.error('[api] notify failed:', err.message));
+    res.status(201).json(product);
   } catch (err) {
     res.status(503).json({ error: 'db_unavailable', detail: err.message });
   }

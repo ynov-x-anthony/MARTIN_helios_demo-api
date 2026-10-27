@@ -1,4 +1,4 @@
-name: Docker image scan
+name: Build, scan and deploy
 
 on:
   push:
@@ -7,28 +7,117 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
-  scan:
+  image:
+    name: image (${{ matrix.service }})
     runs-on: ubuntu-latest
+    env:
+      IMAGE_REPOSITORY: ghcr.io/ynov-x-anthony/martin_helios_demo-api
+    strategy:
+      matrix:
+        service: [api, notifier]
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build image
+      - name: Build ${{ matrix.service }}
         uses: docker/build-push-action@v6
         with:
-          context: ./api
-          file: ./api/Dockerfile.multi
-          tags: demo-api:ci
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/${{ matrix.service == 'api' && 'Dockerfile.multi' || 'Dockerfile' }}
+          tags: ${{ env.IMAGE_REPOSITORY }}/${{ matrix.service }}:${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci' }}
           load: true
 
       - name: Scan with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: demo-api:ci
+          image-ref: ${{ env.IMAGE_REPOSITORY }}/${{ matrix.service }}:${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci' }}
           format: table
-          exit-code: '1'
+          exit-code: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
+
+      - name: Login to GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: docker push ${{ env.IMAGE_REPOSITORY }}/${{ matrix.service }}:${{ github.ref_name }}
+
+  deploy:
+    name: deploy (simulation sur runner)
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPOSITORY: ghcr.io/ynov-x-anthony/martin_helios_demo-api
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create temporary database password
+        run: |
+          mkdir -p secrets
+          openssl rand -hex 24 > secrets/db_password.txt
+
+      - name: Pull and start the published stack
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          docker compose pull && docker compose up -d
+
+      - name: Check the API and notifier
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8080/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://localhost:8080/ready
+          curl --fail --silent -X POST http://localhost:8080/products \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"Clavier meca","price_cents":5900}'
+          for attempt in $(seq 1 10); do
+            if docker compose logs --no-color notifier | grep -F 'Clavier meca' >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          docker compose ps
+          docker compose logs --no-color --tail=5 notifier
+          docker compose logs --no-color notifier | grep -F 'Clavier meca' >/dev/null
+          {
+            echo '## Déploiement simulé sur le runner GitHub'
+            echo "Tag : ${IMAGE_TAG}"
+            echo
+            echo 'La stack a démarré avec les images publiées, et `POST /products` a déclenché une notification.'
+            echo
+            echo '```text'
+            docker compose logs --no-color --tail=5 notifier
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
